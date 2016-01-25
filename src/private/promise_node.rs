@@ -306,7 +306,7 @@ impl<T, E> ArrayJoin<T, E> {
             .map(|promise| {
                 let mut node = promise.node;
                 let (handle, dropper) = EventHandle::new();
-                node.on_ready(handle);
+                node.on_ready(handle.clone());
                 handle.set(Box::new(ArrayJoinBranch {
                     index: idx,
                     state: Rc::downgrade(&state),
@@ -392,7 +392,7 @@ impl<T, E> ExclusiveJoin<T, E> {
 
         {
             let (handle, dropper) = EventHandle::new();
-            left.on_ready(handle);
+            left.on_ready(handle.clone());
             handle.set(Box::new(ExclusiveJoinBranch { state: state.clone(),
                                                       side: ExclusiveJoinSide::Left }));
 
@@ -401,7 +401,7 @@ impl<T, E> ExclusiveJoin<T, E> {
 
         {
             let (handle, dropper) = EventHandle::new();
-            right.on_ready(handle);
+            right.on_ready(handle.clone());
             handle.set(Box::new(ExclusiveJoinBranch { state: state.clone(),
                                                       side: ExclusiveJoinSide::Right }));
 
@@ -474,7 +474,7 @@ impl <T, E> ForkHub<T, E> where T: 'static + Clone, E: 'static + Clone {
     pub fn new(mut inner: Box<PromiseNode<T, E>>) -> ForkHub<T, E> {
         // TODO(someday): KJ calls setSelfPointer() here.
         let (handle, dropper) = EventHandle::new();
-        inner.on_ready(handle);
+        inner.on_ready(handle.clone());
         let state = Rc::new(RefCell::new(ForkHubState {branches: Vec::new(),
                                                        stage: ForkHubStage::Waiting(inner)}));
         let event = Box::new(ForkEvent { state: state.clone() }) as Box<Event>;

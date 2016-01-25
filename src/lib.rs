@@ -304,8 +304,8 @@ impl EventLoop {
                 _running: false,
                 _last_runnable_state: false,
                 events: RefCell::new(events),
-                head: head_handle,
-                tail: RefCell::new(head_handle),
+                head: head_handle.clone(),
+                tail: RefCell::new(head_handle.clone()),
                 depth_first_insertion_point: RefCell::new(head_handle), // insert after this node
                 currently_firing: RefCell::new(None),
                 to_destroy: RefCell::new(None),
@@ -340,26 +340,26 @@ impl EventLoop {
     }
 
     fn arm_depth_first(&self, event_handle: private::EventHandle) {
-        let insertion_node_next = self.events.borrow()[self.depth_first_insertion_point.borrow().0].next;
+        let ref insertion_node_next = self.events.borrow()[self.depth_first_insertion_point.borrow().0].next;
 
         match insertion_node_next {
-            Some(next_handle) => {
-                self.events.borrow_mut()[next_handle.0].prev = Some(event_handle);
-                self.events.borrow_mut()[event_handle.0].next = Some(next_handle);
+            &Some(ref next_handle) => {
+                self.events.borrow_mut()[next_handle.0].prev = Some(event_handle.clone());
+                self.events.borrow_mut()[event_handle.0].next = Some(next_handle.clone());
             }
-            None => {
-                *self.tail.borrow_mut() = event_handle;
+            &None => {
+                *self.tail.borrow_mut() = event_handle.clone();
             }
         }
 
         self.events.borrow_mut()[event_handle.0].prev = Some(self.depth_first_insertion_point.borrow().clone());
-        self.events.borrow_mut()[self.depth_first_insertion_point.borrow().0].next = Some(event_handle);
+        self.events.borrow_mut()[self.depth_first_insertion_point.borrow().0].next = Some(event_handle.clone());
         *self.depth_first_insertion_point.borrow_mut() = event_handle;
     }
 
     fn arm_breadth_first(&self, event_handle: private::EventHandle) {
         let events = &mut *self.events.borrow_mut();
-        events[self.tail.borrow().0].next = Some(event_handle);
+        events[self.tail.borrow().0].next = Some(event_handle.clone());
         events[event_handle.0].prev = Some(self.tail.borrow().clone());
         *self.tail.borrow_mut() = event_handle;
     }
@@ -382,32 +382,32 @@ impl EventLoop {
 
         let event_handle = match self.events.borrow()[self.head.0].next {
             None => return false,
-            Some(event_handle) => { event_handle }
+            Some(ref event_handle) => { event_handle.clone() }
         };
-        *self.depth_first_insertion_point.borrow_mut() = event_handle;
+        *self.depth_first_insertion_point.borrow_mut() = event_handle.clone();
 
-        *self.currently_firing.borrow_mut() = Some(event_handle);
+        *self.currently_firing.borrow_mut() = Some(event_handle.clone());
         let mut event = ::std::mem::replace(&mut self.events.borrow_mut()[event_handle.0].event, None)
             .expect("No event to fire?");
         event.fire();
         *self.currently_firing.borrow_mut() = None;
 
-        let maybe_next = self.events.borrow()[event_handle.0].next;
-        self.events.borrow_mut()[self.head.0].next = maybe_next;
+        let maybe_next = self.events.borrow()[event_handle.0].next.clone();
+        self.events.borrow_mut()[self.head.0].next = maybe_next.clone();
         if let Some(e) = maybe_next {
-            self.events.borrow_mut()[e.0].prev = Some(self.head);
+            self.events.borrow_mut()[e.0].prev = Some(self.head.clone());
         }
 
         self.events.borrow_mut()[event_handle.0].next = None;
         self.events.borrow_mut()[event_handle.0].prev = None;
 
         if *self.tail.borrow() == event_handle {
-            *self.tail.borrow_mut() = self.head;
+            *self.tail.borrow_mut() = self.head.clone();
         }
 
-        *self.depth_first_insertion_point.borrow_mut() = self.head;
+        *self.depth_first_insertion_point.borrow_mut() = self.head.clone();
 
-        if let Some(event_handle) = *self.to_destroy.borrow() {
+        if let Some(ref event_handle) = *self.to_destroy.borrow() {
             self.events.borrow_mut().remove(event_handle.0);
             *self.to_destroy.borrow_mut() = None;
         }

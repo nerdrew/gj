@@ -82,15 +82,19 @@ impl EventHandle {
     }
 
     pub fn arm_breadth_first(self) {
-        with_current_event_loop(|event_loop| {
-            event_loop.arm_breadth_first(self);
-        });
+        if self.1.get() {
+            with_current_event_loop(|event_loop| {
+                event_loop.arm_breadth_first(self);
+            });
+        }
     }
 
     pub fn arm_depth_first(self) {
-        with_current_event_loop(|event_loop| {
-            event_loop.arm_depth_first(self);
-        });
+        if self.1.get() {
+            with_current_event_loop(|event_loop| {
+                event_loop.arm_depth_first(self);
+            });
+        }
     }
 }
 
@@ -100,7 +104,7 @@ pub struct EventNode {
     pub prev: Option<EventHandle>
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq)]
 pub struct EventDropper {
     event_handle: EventHandle,
 }
@@ -112,7 +116,7 @@ impl Drop for EventDropper {
         with_current_event_loop(|event_loop| {
             match *event_loop.currently_firing.borrow() {
                 Some(ref h) if h.0 == self.event_handle.0 => {
-                    *event_loop.to_destroy.borrow_mut() = Some(self.event_handle);
+                    *event_loop.to_destroy.borrow_mut() = Some(self.event_handle.clone());
                     return;
                 }
                 _ => (),
@@ -121,20 +125,20 @@ impl Drop for EventDropper {
 
             if let Some(event_node) = maybe_event_node {
                 // event_node.next.prev = event_node.prev
-                if let Some(e) = event_node.next {
-                    event_loop.events.borrow_mut()[e.0].prev = event_node.prev;
+                if let Some(ref e) = event_node.next {
+                    event_loop.events.borrow_mut()[e.0].prev = event_node.prev.clone();
                 }
                 // event_node.prev.next = event_node.next
-                if let Some(e) = event_node.prev {
-                    event_loop.events.borrow_mut()[e.0].next = event_node.next;
+                if let Some(ref e) = event_node.prev {
+                    event_loop.events.borrow_mut()[e.0].next = event_node.next.clone();
                 }
 
                 if event_loop.depth_first_insertion_point.borrow().0 == self.event_handle.0 {
-                    *event_loop.depth_first_insertion_point.borrow_mut() = event_node.prev.unwrap();
+                    *event_loop.depth_first_insertion_point.borrow_mut() = event_node.prev.clone().unwrap();
                 }
 
                 if event_loop.tail.borrow().0 == self.event_handle.0 {
-                    *event_loop.tail.borrow_mut() = event_node.prev.unwrap();
+                    *event_loop.tail.borrow_mut() = event_node.prev.clone().unwrap();
                 }
             }
         });
@@ -262,7 +266,7 @@ impl <T, E> PromiseNode<T, E> for PromiseAndFulfillerWrapper<T, E> {
 
 pub struct TaskSetImpl<T, E> where T: 'static, E: 'static {
     reaper: Rc<RefCell<Box<TaskReaper<T, E>>>>,
-    tasks: Rc<RefCell<HashMap<EventHandle, EventDropper>>>,
+    tasks: Rc<RefCell<HashMap<Handle, EventDropper>>>,
 }
 
 impl <T, E> TaskSetImpl <T, E> {
@@ -275,21 +279,21 @@ impl <T, E> TaskSetImpl <T, E> {
 
       pub fn add(&self, mut node: Box<PromiseNode<T, E>>) {
           let (handle, dropper) = EventHandle::new();
-          node.on_ready(handle);
+          node.on_ready(handle.clone());
           let task = Task {
               weak_reaper: Rc::downgrade(&self.reaper),
               weak_tasks: Rc::downgrade(&self.tasks),
               node: Some(node),
-              event_handle: handle
+              event_handle: handle.clone()
           };
           handle.set(Box::new(task));
-          self.tasks.borrow_mut().insert(handle, dropper);
+          self.tasks.borrow_mut().insert(handle.0, dropper);
     }
 }
 
 pub struct Task<T, E> where T: 'static, E: 'static {
     weak_reaper: Weak<RefCell<Box<TaskReaper<T, E>>>>,
-    weak_tasks: Weak<RefCell<HashMap<EventHandle, EventDropper>>>,
+    weak_tasks: Weak<RefCell<HashMap<Handle, EventDropper>>>,
     node: Option<Box<PromiseNode<T, E>>>,
     event_handle: EventHandle,
 }
@@ -319,6 +323,6 @@ impl <T, E> Event for Task<T, E> {
         }
         let tasks = self.weak_tasks.upgrade().expect("dangling reference to tasks?");
         let mut tmp = tasks.borrow_mut();
-        tmp.remove(&self.event_handle);
+        tmp.remove(&self.event_handle.0);
     }
 }

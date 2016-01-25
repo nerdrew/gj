@@ -280,10 +280,10 @@ pub struct EventLoop {
     _last_runnable_state: bool,
     events: RefCell<handle_table::HandleTable<private::EventNode>>,
     head: private::EventHandle,
-    tail: Cell<private::EventHandle>,
-    depth_first_insertion_point: Cell<private::EventHandle>,
-    currently_firing: Cell<Option<private::EventHandle>>,
-    to_destroy: Cell<Option<private::EventHandle>>,
+    tail: RefCell<private::EventHandle>,
+    depth_first_insertion_point: RefCell<private::EventHandle>,
+    currently_firing: RefCell<Option<private::EventHandle>>,
+    to_destroy: RefCell<Option<private::EventHandle>>,
 }
 
 
@@ -296,7 +296,7 @@ impl EventLoop {
     {
         let mut events = handle_table::HandleTable::<private::EventNode>::new();
         let dummy = private::EventNode { event: None, next: None, prev: None };
-        let head_handle = private::EventHandle(events.push(dummy));
+        let head_handle = private::EventHandle(events.push(dummy), Rc::new(Cell::new(true)));
 
         EVENT_LOOP.with(move |maybe_event_loop| {
             let event_loop = EventLoop {
@@ -305,10 +305,10 @@ impl EventLoop {
                 _last_runnable_state: false,
                 events: RefCell::new(events),
                 head: head_handle,
-                tail: Cell::new(head_handle),
-                depth_first_insertion_point: Cell::new(head_handle), // insert after this node
-                currently_firing: Cell::new(None),
-                to_destroy: Cell::new(None),
+                tail: RefCell::new(head_handle),
+                depth_first_insertion_point: RefCell::new(head_handle), // insert after this node
+                currently_firing: RefCell::new(None),
+                to_destroy: RefCell::new(None),
             };
 
             assert!(maybe_event_loop.borrow().is_none());
@@ -340,7 +340,7 @@ impl EventLoop {
     }
 
     fn arm_depth_first(&self, event_handle: private::EventHandle) {
-        let insertion_node_next = self.events.borrow()[self.depth_first_insertion_point.get().0].next;
+        let insertion_node_next = self.events.borrow()[self.depth_first_insertion_point.borrow().0].next;
 
         match insertion_node_next {
             Some(next_handle) => {
@@ -348,20 +348,20 @@ impl EventLoop {
                 self.events.borrow_mut()[event_handle.0].next = Some(next_handle);
             }
             None => {
-                self.tail.set(event_handle);
+                *self.tail.borrow_mut() = event_handle;
             }
         }
 
-        self.events.borrow_mut()[event_handle.0].prev = Some(self.depth_first_insertion_point.get());
-        self.events.borrow_mut()[self.depth_first_insertion_point.get().0].next = Some(event_handle);
-        self.depth_first_insertion_point.set(event_handle);
+        self.events.borrow_mut()[event_handle.0].prev = Some(self.depth_first_insertion_point.borrow().clone());
+        self.events.borrow_mut()[self.depth_first_insertion_point.borrow().0].next = Some(event_handle);
+        *self.depth_first_insertion_point.borrow_mut() = event_handle;
     }
 
     fn arm_breadth_first(&self, event_handle: private::EventHandle) {
         let events = &mut *self.events.borrow_mut();
-        events[self.tail.get().0].next = Some(event_handle);
-        events[event_handle.0].prev = Some(self.tail.get());
-        self.tail.set(event_handle);
+        events[self.tail.borrow().0].next = Some(event_handle);
+        events[event_handle.0].prev = Some(self.tail.borrow().clone());
+        *self.tail.borrow_mut() = event_handle;
     }
 
     /// Runs the event loop for `max_turn_count` turns or until there is nothing left to be done,
@@ -384,13 +384,13 @@ impl EventLoop {
             None => return false,
             Some(event_handle) => { event_handle }
         };
-        self.depth_first_insertion_point.set(event_handle);
+        *self.depth_first_insertion_point.borrow_mut() = event_handle;
 
-        self.currently_firing.set(Some(event_handle));
+        *self.currently_firing.borrow_mut() = Some(event_handle);
         let mut event = ::std::mem::replace(&mut self.events.borrow_mut()[event_handle.0].event, None)
             .expect("No event to fire?");
         event.fire();
-        self.currently_firing.set(None);
+        *self.currently_firing.borrow_mut() = None;
 
         let maybe_next = self.events.borrow()[event_handle.0].next;
         self.events.borrow_mut()[self.head.0].next = maybe_next;
@@ -401,15 +401,15 @@ impl EventLoop {
         self.events.borrow_mut()[event_handle.0].next = None;
         self.events.borrow_mut()[event_handle.0].prev = None;
 
-        if self.tail.get() == event_handle {
-            self.tail.set(self.head);
+        if *self.tail.borrow() == event_handle {
+            *self.tail.borrow_mut() = self.head;
         }
 
-        self.depth_first_insertion_point.set(self.head);
+        *self.depth_first_insertion_point.borrow_mut() = self.head;
 
-        if let Some(event_handle) = self.to_destroy.get() {
+        if let Some(event_handle) = *self.to_destroy.borrow() {
             self.events.borrow_mut().remove(event_handle.0);
-            self.to_destroy.set(None);
+            *self.to_destroy.borrow_mut() = None;
         }
 
         true

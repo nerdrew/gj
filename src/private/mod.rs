@@ -19,7 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::collections::HashMap;
 use std::result::Result;
@@ -57,15 +57,21 @@ pub trait Event {
     fn fire(&mut self);
 }
 
-#[derive(PartialEq, Eq, Copy, Clone, Hash)]
-pub struct EventHandle(pub Handle);
+#[derive(PartialEq, Eq)]
+pub struct EventHandle(pub Handle, pub Rc<Cell<bool>>); // bool: is still valid?
+
+impl Clone for EventHandle {
+    fn clone(&self) -> EventHandle {
+        EventHandle(self.0, self.1.clone())
+    }
+}
 
 impl EventHandle {
     pub fn new() -> (EventHandle, EventDropper) {
         with_current_event_loop(|event_loop| {
             let node = EventNode { event: None, next: None, prev: None };
-            let handle = EventHandle(event_loop.events.borrow_mut().push(node));
-            (handle, EventDropper { event_handle: handle })
+            let handle = EventHandle(event_loop.events.borrow_mut().push(node), Rc::new(Cell::new(true)));
+            (handle.clone(), EventDropper { event_handle: handle })
         })
     }
 
@@ -101,10 +107,12 @@ pub struct EventDropper {
 
 impl Drop for EventDropper {
     fn drop(&mut self) {
+        self.event_handle.1.set(false);
+
         with_current_event_loop(|event_loop| {
-            match event_loop.currently_firing.get() {
-                Some(h) if h == self.event_handle => {
-                    event_loop.to_destroy.set(Some(self.event_handle));
+            match *event_loop.currently_firing.borrow() {
+                Some(ref h) if h.0 == self.event_handle.0 => {
+                    *event_loop.to_destroy.borrow_mut() = Some(self.event_handle);
                     return;
                 }
                 _ => (),
@@ -121,14 +129,12 @@ impl Drop for EventDropper {
                     event_loop.events.borrow_mut()[e.0].next = event_node.next;
                 }
 
-                let insertion_point = event_loop.depth_first_insertion_point.get();
-                if insertion_point.0 == self.event_handle.0 {
-                    event_loop.depth_first_insertion_point.set(event_node.prev.unwrap());
+                if event_loop.depth_first_insertion_point.borrow().0 == self.event_handle.0 {
+                    *event_loop.depth_first_insertion_point.borrow_mut() = event_node.prev.unwrap();
                 }
 
-                let tail = event_loop.tail.get();
-                if tail.0 == self.event_handle.0 {
-                    event_loop.tail.set(event_node.prev.unwrap());
+                if event_loop.tail.borrow().0 == self.event_handle.0 {
+                    *event_loop.tail.borrow_mut() = event_node.prev.unwrap();
                 }
             }
         });

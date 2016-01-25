@@ -96,7 +96,7 @@ fn drop_fulfiller() {
 }
 
 #[test]
-fn chain() {
+fn chain_simple() {
     EventLoop::top_level(|wait_scope| {
 
         let promise: Promise<i32, ()> = Promise::ok(()).map(|()| { Ok(123) });

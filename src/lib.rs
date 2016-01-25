@@ -340,8 +340,7 @@ impl EventLoop {
     }
 
     fn arm_depth_first(&self, event_handle: private::EventHandle) {
-        let ref insertion_node_next = self.events.borrow()[self.depth_first_insertion_point.borrow().0].next;
-
+        let ref insertion_node_next = self.events.borrow()[self.depth_first_insertion_point.borrow().0].next.clone();
         match insertion_node_next {
             &Some(ref next_handle) => {
                 self.events.borrow_mut()[next_handle.0].prev = Some(event_handle.clone());
@@ -351,7 +350,6 @@ impl EventLoop {
                 *self.tail.borrow_mut() = event_handle.clone();
             }
         }
-
         self.events.borrow_mut()[event_handle.0].prev = Some(self.depth_first_insertion_point.borrow().clone());
         self.events.borrow_mut()[self.depth_first_insertion_point.borrow().0].next = Some(event_handle.clone());
         *self.depth_first_insertion_point.borrow_mut() = event_handle;
@@ -379,11 +377,11 @@ impl EventLoop {
 
     /// Runs the event loop for a single step.
     fn turn(&self) -> bool {
-
         let event_handle = match self.events.borrow()[self.head.0].next {
             None => return false,
             Some(ref event_handle) => { event_handle.clone() }
         };
+
         *self.depth_first_insertion_point.borrow_mut() = event_handle.clone();
 
         *self.currently_firing.borrow_mut() = Some(event_handle.clone());
@@ -409,8 +407,8 @@ impl EventLoop {
 
         if let Some(ref event_handle) = *self.to_destroy.borrow() {
             self.events.borrow_mut().remove(event_handle.0);
-            *self.to_destroy.borrow_mut() = None;
         }
+        *self.to_destroy.borrow_mut() = None;
 
         true
     }

@@ -110,6 +110,15 @@ impl <T, E> Promise <T, E> {
         (result_promise, PromiseFulfiller{ hub: result, done: false })
     }
 
+    pub fn and_channel() -> (Promise<(), std::io::Error>, io::ChannelFulfiller) {
+        let result = Rc::new(RefCell::new(PromiseAndFulfillerHub::new()));
+        let result_promise: Promise<(), std::io::Error> =
+            Promise { node: Box::new(PromiseAndFulfillerWrapper::new(result.clone()))};
+        let fulfiller = PromiseFulfiller{ hub: result, done: false };
+        let channel = io::ChannelFulfiller::new(fulfiller);
+        (result_promise, channel)
+    }
+
     /// Chains further computation to be executed once the promise resolves.
     /// When the promise is fulfilled or rejected, invokes `func` on its result.
     ///

@@ -693,3 +693,44 @@ fn eagerly_evaluate() {
         Ok(())
     }).unwrap();
 }
+
+#[test]
+fn and_channel_and_fulfill() {
+    EventLoop::top_level(|wait_scope| {
+        let (promise, channel) = Promise::<(), ()>::and_channel();
+
+        let p1 = promise.map(|_| { Ok(1) });
+
+        let thread = std::thread::spawn(move || {
+            channel.fulfill();
+        });
+
+        thread.join().unwrap();
+
+        let value = p1.wait(wait_scope).unwrap();
+        assert_eq!(value, 1);
+        Ok(())
+    }).unwrap();
+}
+
+#[test]
+fn and_channel_and_reject() {
+    use std::error::Error;
+
+    EventLoop::top_level(|wait_scope| {
+        let (promise, channel) = Promise::<(), ()>::and_channel();
+
+        let p1 = promise.map(|_| { Ok(1) });
+
+        let thread = std::thread::spawn(move || {
+            channel.reject();
+        });
+
+        thread.join().unwrap();
+
+        let err = p1.wait(wait_scope).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+        assert_eq!(err.description(), "Channel fulfiller was rejected");
+        Ok(())
+    }).unwrap();
+}

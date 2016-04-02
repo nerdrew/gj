@@ -254,6 +254,41 @@ impl FdObserver {
     }
 }
 
+pub struct ChannelFulfiller {
+    sender: ::mio::Sender<Message>,
+    handle: Handle,
+}
+
+impl ChannelFulfiller {
+    pub fn new(fulfiller: PromiseFulfiller<(), ::std::io::Error>) -> ChannelFulfiller {
+        with_current_event_loop(move |event_loop| {
+            let receiver = ChannelReceiver { fulfiller: Some(fulfiller) };
+            let event_port = &mut *event_loop.event_port.borrow_mut();
+            let handle = event_port.handler.channels.push(receiver);
+            ChannelFulfiller { sender: event_port.reactor.channel(), handle: handle }
+        })
+    }
+
+    pub fn fulfill(&self) {
+        self.sender.send(Message { handle: self.handle, fulfill: true })
+            .expect("ChannelFulfiller failed to notify promise fulfill");
+    }
+
+    pub fn reject(&self) {
+        self.sender.send(Message { handle: self.handle, fulfill: false })
+            .expect("ChannelFulfiller failed to notify promise reject");
+    }
+}
+
+struct ChannelReceiver {
+    fulfiller: Option<PromiseFulfiller<(), ::std::io::Error>>,
+}
+
+struct Message {
+    pub handle: Handle,
+    pub fulfill: bool,
+}
+
 #[doc(hidden)]
 pub struct MioEventPort {
     handler: Handler,
@@ -262,12 +297,13 @@ pub struct MioEventPort {
 
 struct Handler {
     observers: HandleTable<FdObserver>,
+    channels: HandleTable<ChannelReceiver>,
 }
 
 impl MioEventPort {
     pub fn new() -> Result<MioEventPort, ::std::io::Error> {
         Ok(MioEventPort {
-            handler: Handler { observers: HandleTable::new() },
+            handler: Handler { observers: HandleTable::new(), channels: HandleTable::new() },
             reactor: try!(::mio::EventLoop::new()),
         })
     }
@@ -275,7 +311,7 @@ impl MioEventPort {
 
 impl ::mio::Handler for Handler {
     type Timeout = Timeout;
-    type Message = ();
+    type Message = Message;
     fn ready(&mut self, _event_loop: &mut ::mio::EventLoop<Handler>,
              token: ::mio::Token, events: ::mio::EventSet) {
         if events.is_readable() {
@@ -293,6 +329,19 @@ impl ::mio::Handler for Handler {
                 Some(fulfiller) => fulfiller.fulfill(()),
                 None => (),
             }
+        }
+    }
+    fn notify(&mut self, _event_loop: &mut ::mio::EventLoop<Handler>, msg: Message) {
+        match ::std::mem::replace(&mut self.channels[msg.handle].fulfiller, None) {
+            Some(fulfiller) => {
+                if msg.fulfill {
+                    fulfiller.fulfill(())
+                } else {
+                    fulfiller.reject(::std::io::Error::new(
+                            ::std::io::ErrorKind::Other, "Channel fulfiller was rejected"))
+                }
+            },
+            None => (),
         }
     }
     fn timeout(&mut self, _event_loop: &mut ::mio::EventLoop<Handler>, timeout: Timeout) {
